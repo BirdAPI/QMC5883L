@@ -1,6 +1,7 @@
-#include <Wire.h>
-#include <math.h>
 #include "QMC5883L.h"
+
+#include <Wire.h>
+#include <cmath>
 
 /*
  * QMC5883L
@@ -56,41 +57,36 @@
 #define M_PI 3.14159265358979323846264338327950288
 #endif
 
-static void write_register( int addr, int reg, int value )
-{
+static void write_register(int addr, int reg, int value) {
   Wire.beginTransmission(addr);
   Wire.write(reg);
   Wire.write(value);
   Wire.endTransmission();
 }
 
-static int read_register( int addr, int reg, int count )
-{
+static int read_register(int addr, int reg, int count) {
   Wire.beginTransmission(addr);
   Wire.write(reg);
   Wire.endTransmission();
   
   Wire.requestFrom(addr,count);
   int n = Wire.available();
-  if(n!=count) return 0;
+  if (n != count) { return 0; }
 
   return n;
 }
 
-void QMC5883L::reconfig()
-{
+void QMC5883L::reconfig() {
   write_register(addr,QMC5883L_CONFIG,oversampling|range|rate|mode);  
 }
 
-void QMC5883L::reset()
-{
+void QMC5883L::reset() {
   write_register(addr,QMC5883L_RESET,0x01);
   reconfig();
 }
 
-void QMC5883L::setOversampling( int x )
-{
-  switch(x) {
+bool QMC5883L::setOversampling(int x) {
+  switch (x) {
     case 512:
       oversampling = QMC5883L_CONFIG_OS512;
       break;
@@ -103,26 +99,32 @@ void QMC5883L::setOversampling( int x )
     case 64:
       oversampling = QMC5883L_CONFIG_OS64;
       break;
-  } 
+
+    default:
+      return false;
+  }
   reconfig();
+  return true;
 }
 
-void QMC5883L::setRange( int x )
-{
-  switch(x) {
+bool QMC5883L::setRange(int x) {
+  switch (x) {
     case 2:
       range = QMC5883L_CONFIG_2GAUSS;
       break;
     case 8:
       range = QMC5883L_CONFIG_8GAUSS;
       break;
+
+    default:
+      return false;
   }
   reconfig();
+  return true;
 }
 
-void QMC5883L::setSamplingRate( int x )
-{
-  switch(x) {
+bool QMC5883L::setSamplingRate(int x) {
+  switch (x) {
     case 10:
       rate = QMC5883L_CONFIG_10HZ;
       break;
@@ -135,8 +137,12 @@ void QMC5883L::setSamplingRate( int x )
     case 200:
       rate = QMC5883L_CONFIG_200HZ;
       break;
+
+    default:
+      return false;
   }
   reconfig();
+  return true;
 }
 
 void QMC5883L::init() {
@@ -149,24 +155,34 @@ void QMC5883L::init() {
   reset();
 }
 
-int QMC5883L::ready()
-{
-  if(!read_register(addr,QMC5883L_STATUS,1)) return 0;
+bool QMC5883L::ready() {
+  if (!read_register(addr,QMC5883L_STATUS,1)) {
+    return false;
+  }
   uint8_t status = Wire.read();
   return status & QMC5883L_STATUS_DRDY; 
 }
 
-int QMC5883L::readRaw( int16_t *x, int16_t *y, int16_t *z, int16_t *t )
-{
-  while(!ready()) {}
+bool QMC5883L::readRaw(int16_t *x, int16_t *y, int16_t *z, int16_t *t, bool waitUntilReady) {
+  if (waitUntilReady) {
+    while (!ready()) { yield(); }
+  } else {
+    if (!ready()) { return false; }
+  }
 
-  if(!read_register(addr,QMC5883L_X_LSB,6)) return 0;
+  if (!read_register(addr,QMC5883L_X_LSB,6)) { return false; }
 
   *x = Wire.read() | (Wire.read()<<8);
   *y = Wire.read() | (Wire.read()<<8);
   *z = Wire.read() | (Wire.read()<<8);
 
-  return 1;
+  // update the observed boundaries of the measurements
+  if (*x < xlow) { xlow = *x; }
+  if (*x > xhigh) { xhigh = *x; }
+  if (*y < ylow) { ylow = *y; }
+  if (*y > yhigh) { yhigh = *y; }
+
+  return true;
 }
 
 void QMC5883L::resetCalibration() {
@@ -174,35 +190,25 @@ void QMC5883L::resetCalibration() {
   xlow = ylow = 0;
 }
 
-int QMC5883L::readHeading()
-{
+float QMC5883L::readHeading(int16_t *x, int16_t *y, int16_t *z, int16_t *t, bool waitUntilReady) {
+  if (!readRaw(x, y, z, t, waitUntilReady)) { return 0; }
+
+  // bail out if not enough data is available
+  if (xlow == xhigh || ylow == yhigh) { return 0; }
+
+  // center the measurement by subtracting the average
+  x -= (xhigh + xlow) / 2;
+  y -= (yhigh + ylow) / 2;
+
+  // Scale the measurement to the range observed
+  auto fx = (float)*x / (float)(xhigh - xlow);
+  auto fy = (float)*y / (float)(yhigh - ylow);
+
+  auto heading = (float)((180.0 * atan2(fy, fx)) / M_PI);
+  return heading <= 0 ? heading + 360.f : heading;
+}
+
+float QMC5883L::readHeading(bool waitUntilReady) {
   int16_t x, y, z, t;
-
-  if(!readRaw(&x,&y,&z,&t)) return 0;
-
-  /* Update the observed boundaries of the measurements */
-
-  if(x<xlow) xlow = x;
-  if(x>xhigh) xhigh = x;
-  if(y<ylow) ylow = y;
-  if(y>yhigh) yhigh = y;
-
-  /* Bail out if not enough data is available. */
-  
-  if( xlow==xhigh || ylow==yhigh ) return 0;
-
-  /* Recenter the measurement by subtracting the average */
-
-  x -= (xhigh+xlow)/2;
-  y -= (yhigh+ylow)/2;
-
-  /* Rescale the measurement to the range observed. */
-  
-  float fx = (float)x/(xhigh-xlow);
-  float fy = (float)y/(yhigh-ylow);
-
-  int heading = 180.0*atan2(fy,fx)/M_PI;
-  if(heading<=0) heading += 360;
-  
-  return heading;
+  return readHeading(&x, &y, &z, &t, waitUntilReady);
 }

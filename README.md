@@ -9,7 +9,7 @@ The GY-271 is supposed to have an *H*MC5883L, but some
 knockoff boards have a *Q*MC5883L which has the same
 basic capability, but is not compatible with the H.
 
-If you have a GY-271 board and observe an I2C address of 0x0C
+If you have a GY-271 board and observe an I2C address of 0x0D
 and read back nothing but zeros from the board, then you
 probably have a QMC5883L chip!  Try this library and see
 if it works for you.
@@ -42,7 +42,7 @@ Read raw magnetometer and temperature values from the compass.
 ```
 int r;
 int16_t x,y,z,t;
-r = compass.readRaw(&x,&y,&z,&t)
+r = compass.readRaw(&x,&y,&z,&t);
 ```
 
 Read calibrated heading values from the compass.

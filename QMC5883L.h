@@ -1,21 +1,23 @@
-#ifndef QMC5883L_H
-#define QMC5883L_H
+#pragma once
+
+#include <cstdint>
 
 class QMC5883L {
 public:
   void init();
   void reset();
-  int  ready();
+  bool ready();
   void reconfig();
-  
-  int readHeading();
-  int readRaw( int16_t *x, int16_t *y, int16_t *z, int16_t *t );
+
+  float readHeading(bool waitUntilReady = true);
+  float readHeading(int16_t *x, int16_t *y, int16_t *z, int16_t *t, bool waitUntilReady = true);
+  bool readRaw(int16_t *x, int16_t *y, int16_t *z, int16_t *t, bool waitUntilReady = true);
 
   void resetCalibration();
 
-  void setSamplingRate( int rate );
-  void setRange( int range );
-  void setOversampling( int ovl );
+  bool setSamplingRate(int rate);
+  bool setRange(int range);
+  bool setOversampling(int ovl);
   
 private:
   int16_t xhigh, xlow;
@@ -26,5 +28,3 @@ private:
   uint8_t range;
   uint8_t oversampling;
 };
-
-#endif
